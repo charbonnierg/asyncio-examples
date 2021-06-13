@@ -106,6 +106,7 @@ class AsyncThread(threading.Thread):
         try:
             await asyncio.wait(asyncio.all_tasks(self._loop), return_when="ALL_COMPLETED")
         except asyncio.CancelledError:
+            # We expect tasks to be cancelled
             pass
         return self._loop.stop()
 
@@ -163,15 +164,10 @@ q1, q1_out = t.create_queues(2)
 @t.task
 async def process1() -> None:
     while True:
-        try:
-            # Fetch from one queue
-            v = await q1.get()
-            # And put in another
-            await q1_out.put(v)
-        except asyncio.CancelledError as err:
-            # You can catch cancellation here
-            print("Cancelled process 1")
-            raise err
+        # Fetch from one queue
+        v = await q1.get()
+        # And put in another
+        await q1_out.put(v)
 
 
 # Start the thread, this will start the first task
@@ -187,14 +183,11 @@ q2_out: QueueProxy[List[int]] = t.create_queue(start=True)
 # This is just an example
 async def process2() -> None:
     while True:
-        try:
-            # Fetch from one queue
-            v = await q2.get()
-            # And put in another
-            await q2_out.put(v)
-        except asyncio.CancelledError as err:
-            print("Cancelled process 2")
-            raise err
+        # Fetch from one queue
+        v = await q2.get()
+        # And put in another
+        await q2_out.put(v)
+
 # Start the other start after thread is started
 t.create_task(process2)
 
