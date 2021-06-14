@@ -1,0 +1,2 @@
+class NotReadyError(Exception):
+    pass
