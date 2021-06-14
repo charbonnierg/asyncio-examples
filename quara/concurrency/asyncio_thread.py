@@ -54,7 +54,12 @@ class AsyncioThread(threading.Thread):
     """
 
     def __init__(self, *, max_workers: Optional[int] = None, **kwargs: Any):
-        """Create a new instance of asyncio thread."""
+        """Create a new instance of asyncio thread.
+
+        Args:
+            max_workers: Maximum number of threads in ThreadPoolExecutor attached to the thread
+            **kwargs: Any argument accepeted by threading.Thread.__init__ method
+        """
         kwargs = {**kwargs, "daemon": True}
         # It is mandatory to call the __init__ method of threading.Thread parent class
         super().__init__(**kwargs)
@@ -83,12 +88,19 @@ class AsyncioThread(threading.Thread):
         THREADS.append(self)
 
     def cancel(self) -> None:
+        """Cancel all tasks running in thread event loop"""
         # Iterate over all running tasks
         for task in asyncio.all_tasks(loop=self._loop):
             # Cancel the task
             task.cancel()
 
     async def stop(self) -> None:
+        """Stop the thread.
+
+        In order to stop the thread, all tasks running in the event loop are cancelled. Once
+        all tasks are either completed or cancelled, the event loop is stopped and the ThreadPoolExecutor
+        shutdowned.
+        """
         self.cancel()
         try:
             await asyncio.wait(
@@ -119,17 +131,31 @@ class AsyncioThread(threading.Thread):
         return coro_function
 
     async def create_task(self, coro: Coroutine) -> asyncio.Task:
+        """Create a task and submit it to the thread event loop.
+
+        Warning: This async method must be called within the AsyncioThread instance.
+        """
         return asyncio.create_task(coro)
 
     async def create_tasks(self, *coroutines: Coroutine) -> List[asyncio.Task]:
+        """Create several tasks and submit them to the thread event loop.
+
+        Warning: This async method must be called within the AsyncioThread instance.
+        """
         return [asyncio.create_task(coro) for coro in coroutines]
 
     def create_task_threadsafe(self, coro: Coroutine) -> asyncio.Task:
-        """Create a single task to run in the AsyncThread."""
+        """Create a task and submit it to the thread event loop.
+
+        Warning: This method must be called outside the AsyncioThread instance, in the main thread for example.
+        """
         return self.run_threadsafe(self.create_tasks(coro)).result()[0]
 
     def create_tasks_threadsafe(self, *coroutines: Coroutine) -> List[asyncio.Task]:
-        """Create several tasks to run in the AsyncThread."""
+        """Create several tasks and submit them to the thread event loop.
+
+        Warning: This method must be called outside the AsyncioThread instance, in the main thread for example.
+        """
         return self.run_threadsafe(self.create_tasks(*coroutines)).result()
 
     async def _signal_handler(self) -> None:
@@ -157,7 +183,10 @@ class AsyncioThread(threading.Thread):
         await self.create_tasks(*self._tasks)
 
     def run(self):
-        """Synchronously run thread."""
+        """Function run within thread.
+
+        Once this function ends, thread is stopped.
+        """
         # First submit all tasks
         self._loop.run_until_complete(self._run())
         # Then run loop forever (I.E, until loop is stopped)
@@ -172,7 +201,10 @@ class AsyncioThread(threading.Thread):
     def create_queue_threadsafe(
         self, start: bool = False, **kwargs: Any
     ) -> QueueProxy[Any]:
-        """Create a single QueueProxy to use with the AsyncioThread instance."""
+        """Create a single QueueProxy to use with the AsyncioThread instance.
+
+        Warning: This method must be called outside the AsyncioThread instance, in the main thread for example.
+        """
         q: QueueProxy[Any] = QueueProxy(**kwargs)
         is_loop_running = self._loop.is_running()
         if start:
@@ -190,20 +222,29 @@ class AsyncioThread(threading.Thread):
     def create_queues_threadsafe(
         self, n: int, /, start: bool = False, **kwargs: Any
     ) -> Iterable[QueueProxy[Any]]:
-        """Create an iterable of QueueProxy to use with the AsyncioThread instance."""
+        """Create an iterable of QueueProxy to use with the AsyncioThread instance.
+
+        Warning: This method must be called outside the AsyncioThread instance, in the main thread for example.
+        """
         return [self.create_queue_threadsafe(start=start, **kwargs) for _ in range(n)]
 
     def put_threadsafe(
         self, queue: QueueProxy[T], item: T
     ) -> concurrent.futures.Future[None]:
-        """Put an item into a queue running in AsyncThread from a different thread."""
+        """Put an item into a queue running in AsyncThread from a different thread.
+
+        Warning: This method must be called outside the AsyncioThread instance, in the main thread for example.
+        """
         if not self._loop.is_running():
             raise NotReadyError("Event loop is not running yet")
         # Use run_threadsafe method to execute QueueProxy.put() method within the AsyncioThread instance
         return self.run_threadsafe(queue.put(item))
 
     def get_threadsafe(self, queue: QueueProxy[T]) -> T:
-        """Get an item from a queue running in AsyncThread from a different thread."""
+        """Get an item from a queue running in AsyncThread from a different thread.
+
+        Warning: This method must be called outside the AsyncioThread instance, in the main thread for example.
+        """
         if not self._loop.is_running():
             raise NotReadyError("Event loop is not running yet")
         # Use run_threadsafe to execute QueueProxy.get() method within the AsyncioThread instance
@@ -215,7 +256,7 @@ class AsyncioThread(threading.Thread):
     ) -> T:
         """Run a blocking function to another thread to not block event loop.
 
-        This function should always be called within the AsyncioThread instance.
+        Warning: This async method must be called within the AsyncioThread instance.
         """
         if not self._loop.is_running():
             raise NotReadyError("Event loop is not running yet")
@@ -233,12 +274,16 @@ class AsyncioThread(threading.Thread):
         In order to wait for coroutine to finish and get the result, one must
         use the .result() method on the returned Future instance.
 
-        Examples:
+        Example:
             >>> import asyncio
 
-            >>> thread = AsyncioThread()
-            >>> thread.start()
-            >>> thread.run_threadsafe(asyncio.sleep, 1)
+            >>> with AsyncioThread() as thread:
+            >>>     # Get a Future instance after submitting the coroutine
+            >>>     future = thread.run_threadsafe(asyncio.sleep(1))
+            >>>     # Wait for the Future result
+            >>>     future.result()
+
+        Warning: This method must be called outside the AsyncioThread instance, in the main thread for example.
         """
         if not self._loop.is_running():
             raise NotReadyError("Event loop is not running yet")
@@ -250,12 +295,28 @@ class AsyncioThread(threading.Thread):
     def run_in_executor_threadsafe(
         self, func: Callable[..., T], *args: Any, **kwargs: Any
     ) -> concurrent.futures.Future[T]:
+        """Run a function using the ThreadPoolExecutor attached to the thread instance.
+
+        Example:
+            >>> import time
+
+            >>> with AsyncioThread() as thread:
+            >>>     # Get a Future instance after submitting the coroutine
+            >>>     future = thread.run_in_executor_threadsafe(time.sleep, 1)
+            >>>     # Wait for the Future result
+            >>>     future.result()
+
+        Warning: This method must be called outside the AsyncioThread instance, in the main thread for example.
+        """
         return self.run_threadsafe(self.run_in_executor(func, *args, **kwargs))
 
     async def run_until_first_complete(
         self, *coroutines: Coroutine[None, None, T]
     ) -> T:
-        """Run coroutines until first complete and return its result."""
+        """Run coroutines until first complete and return its result.
+
+        Warning: This async method must be called within the AsyncioThread instance.
+        """
         tasks = await self.create_tasks(*coroutines)
         (done, pending) = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         [task.cancel() for task in pending]
@@ -264,14 +325,26 @@ class AsyncioThread(threading.Thread):
     def run_until_first_complete_threadsafe(
         self, *coroutines: Coroutine[None, None, T]
     ) -> concurrent.futures.Future[T]:
+        """Run coroutines until first complete and return its result.
+
+        Warning: This async method must be called within the AsyncioThread instance.
+        """
         return self.run_threadsafe(self.run_until_first_complete(*coroutines))
 
     async def wait(
         self, tasks: Iterable[Task], return_when: str = asyncio.ALL_COMPLETED
     ) -> Tuple[Iterable[Task], Iterable[Task]]:
+        """Wait for asyncio tasks. This function returns when all tasks are completed or cancelled by default.
+
+        Warning: This method must be called outside the AsyncioThread instance, in the main thread for example.
+        """
         return await asyncio.wait(tasks, return_when=return_when)
 
     def wait_threadsafe(
         self, tasks: Iterable[Task], return_when: str = asyncio.ALL_COMPLETED
     ) -> concurrent.futures.Future[Tuple[Iterable[Task], Iterable[Task]]]:
+        """Wait for asyncio tasks. This function returns when all tasks are completed or cancelled by default.
+
+        Warning: This method must be called outside the AsyncioThread instance, in the main thread for example.
+        """
         return self.run_threadsafe(self.wait(tasks, return_when=return_when))
