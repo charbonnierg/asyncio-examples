@@ -7,6 +7,8 @@ packages = [{ include = "quara" }]
 
 [tool.poetry.dependencies]
 python = "^3.8"
+loguru = "^0.5.3"
+uvloop = "^0.15.2"
 
 [tool.poetry.dev-dependencies]
 

@@ -2,6 +2,8 @@ from contextlib import contextmanager
 from time import perf_counter
 from typing import Callable, Iterator
 
+from loguru import logger
+
 
 @contextmanager
 def Timer(print_time: bool = True, *, name: str = "") -> Iterator[Callable[[], float]]:
@@ -14,6 +16,6 @@ def Timer(print_time: bool = True, *, name: str = "") -> Iterator[Callable[[], f
     yield timer_milliseconds
 
     if print_time:
-        print(
+        logger.debug(
             f"{timer_milliseconds():.5f} ms -- Timer{' (' + name + ')' if name else name} exited"
         )
